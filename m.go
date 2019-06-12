@@ -211,8 +211,8 @@ func NewFull(rows, cols int) *FM {
 
 // Full converts any type of binary matrix to a new full matrix. Panics if
 // the argument is a polynomial matrix with any element having degree higher
-// than one, or if m is too large. Types SM, FM, I, R, and S are special-cased;
-// all other types are filled in O(mn) time.
+// than one, or if m is too large. Types SM, FM, I, Z, R, and S are
+// special-cased; all other types are filled in O(mn) time.
 func Full(m M) *FM {
 	rows, cols := m.Size()
 	if rows > 65535 || cols > 65535 {
@@ -235,6 +235,26 @@ func Full(m M) *FM {
 		B.v.SetBit(B.v, rows*cols, 1)
 		for k := 0; k < rows; k++ {
 			B.v.SetBit(B.v, k*rows+k, 1)
+		}
+	case Z:
+		// do nothing
+	case R:
+		for k := 0; k < rows; k++ {
+			r := k + A.n%rows
+			if r < 0 {
+				r += rows
+			}
+			B.v.SetBit(B.v, k*rows+r, 1)
+		}
+	case S:
+		if A.n >= 0 {
+			for i := 0; i < rows-A.n; i++ {
+				B.v.SetBit(B.v, i*rows+i+A.n, 1)
+			}
+		} else {
+			for i := 0; i < rows+A.n; i++ {
+				B.v.SetBit(B.v, (i+A.n)*rows+i, 1)
+			}
 		}
 	default:
 		B.v.SetBit(B.v, rows*cols, 1)
