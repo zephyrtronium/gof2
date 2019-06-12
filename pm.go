@@ -1,6 +1,7 @@
 package gof2
 
 import (
+	"fmt"
 	"math/big"
 	"math/bits"
 )
@@ -70,7 +71,7 @@ func PSparse(m M) *PSM {
 		}
 	case I:
 		for r := 0; r < rows; r++ {
-			B.v[r*0x00010001] = big.NewInt(1)
+			B.v[uint32(r)*0x00010001] = big.NewInt(1)
 		}
 	case Z:
 		// do nothing
@@ -93,11 +94,12 @@ func PSparse(m M) *PSM {
 			}
 		}
 	}
+	return &B
 }
 
 // Size returns the size of the matrix.
 func (A *PSM) Size() (rows, cols int) {
-	return A.r, A.c
+	return int(A.r), int(A.c)
 }
 
 // At returns the polynomial at the given one-based index. The returned element
@@ -113,11 +115,12 @@ func (A *PSM) At(r, c int) *big.Int {
 	return new(big.Int)
 }
 
-// SetAt sets the polynomial at the given one-based index.
+// SetAt sets the polynomial at the given one-based index. The polynomial is
+// not copied.
 func (A *PSM) SetAt(r, c int, p *big.Int) {
 	k := A.index(r, c)
 	if p.Sign() == 0 {
-		delete(A.v[k])
+		delete(A.v, k)
 	} else {
 		A.v[k] = p
 	}
@@ -159,4 +162,90 @@ func (A *PSM) index(r, c int) uint32 {
 		panic(fmt.Sprintf("column index %d out of bounds (size %dx%d)", c+1, A.r, A.c))
 	}
 	return uint32(uint16(c))<<16 | uint32(uint16(r))
+}
+
+// PFM is a full polynomial matrix of size up to 65535x65535.
+type PFM struct {
+	r, c uint16
+	v    []*big.Int
+}
+
+// NewPFull creates a zero matrix of the given size. This allocates all
+// elements. Panics if either size is non-positive or greater than 65535.
+func NewPFull(rows, cols int) *PFM {
+	if rows <= 0 || cols <= 0 {
+		panic(fmt.Sprintf("cannot make %dx%d matrix: size must be positive", rows, cols))
+	}
+	if rows > 65535 || cols > 65535 {
+		panic(fmt.Sprintf("cannot make %dx%d matrix: maximum dimension is 65535", rows, cols))
+	}
+	v := make([]*big.Int, rows*cols)
+	for i := range v {
+		v[i] = new(big.Int)
+	}
+	return &PFM{
+		r: uint16(rows),
+		c: uint16(cols),
+		v: v,
+	}
+}
+
+// PFull converts any type of matrix to a full polynomial matrix. Panics if the
+// argument is too large. There are no special cases; converting any matrix
+// results in m*n calls to m.At().
+func PFull(m M) *PFM {
+	rows, cols := m.Size()
+	if rows > 65535 || cols > 65535 {
+		panic(fmt.Sprintf("cannot make %dx%d matrix: maximum dimension is 65535", rows, cols))
+	}
+	B := PFM{uint16(rows), uint16(cols), make([]*big.Int, rows*cols)}
+	for c := 0; c < cols; c++ {
+		for r := 0; r < rows; r++ {
+			B.v[c*rows+r] = new(big.Int).Set(m.At(r, c))
+		}
+	}
+	return &B
+}
+
+// Size returns the size of the matrix.
+func (A *PFM) Size() (rows, cols int) {
+	return int(A.r), int(A.c)
+}
+
+// At returns the element at the given one-based index. The returned element is
+// always a reference.
+func (A *PFM) At(r, c int) *big.Int {
+	return A.v[A.index(r, c)]
+}
+
+// SetAt sets an element. The polynomial is not copied.
+func (A *PFM) SetAt(r, c int, p *big.Int) {
+	A.v[A.index(r, c)] = p
+}
+
+// AddAt adds a polynomial to that in the given index. The returned value is a
+// a reference.
+func (A *PFM) AddAt(r, c int, p *big.Int) *big.Int {
+	k := A.index(r, c)
+	return A.v[k].Xor(A.v[k], p)
+}
+
+// MulAt multiplies (i.e. convolves coefficients of) the polynomial in a given
+// index by another. The returned value is a reference.
+func (A *PFM) MulAt(r, c int, p *big.Int) *big.Int {
+	k := A.index(r, c)
+	return A.v[k].Mul(A.v[k], p)
+}
+
+// index panics if the given row or column indices are out of bounds and
+// returns the corresponding bit vector coordinate otherwise. The vector is
+// column-major.
+func (A *PFM) index(r, c int) int {
+	if r--; r < 0 || r >= int(A.r) {
+		panic(fmt.Sprintf("row index %d out of bounds (size %dx%d)", r+1, A.r, A.c))
+	}
+	if c--; c < 0 || c >= int(A.c) {
+		panic(fmt.Sprintf("column index %d out of bounds (size %dx%d)", c+1, A.r, A.c))
+	}
+	return c*int(A.r) + r
 }
