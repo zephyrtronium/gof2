@@ -121,8 +121,8 @@ func Sparse(m M) *SM {
 			}
 		}
 	default:
-		for r := 0; r < rows; r++ {
-			for c := 0; c < cols; c++ {
+		for c := 0; c < cols; c++ {
+			for r := 0; r < rows; r++ {
 				if check01(A.At(r+1, c+1)) != 0 {
 					B.v[uint32(c<<16)|uint32(r)] = 1
 				}
@@ -258,8 +258,8 @@ func Full(m M) *FM {
 		}
 	default:
 		B.v.SetBit(B.v, rows*cols, 1)
-		for r := 0; r < rows; r++ {
-			for c := 0; c < cols; c++ {
+		for c := 0; c < cols; c++ {
+			for r := 0; r < rows; r++ {
 				p := check01(A.At(r+1, c+1))
 				if p != 0 {
 					B.v.SetBit(B.v, c*rows+r, 1)
