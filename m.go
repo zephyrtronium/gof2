@@ -108,16 +108,16 @@ func Sparse(m M) *SM {
 			if r < 0 {
 				r += rows
 			}
-			B.v[uint32(r<<16)|uint32(i)] = 1
+			B.v[uint32(i)<<16|uint32(r)] = 1
 		}
 	case S:
 		if A.n >= 0 {
 			for i := 0; i < rows-A.n; i++ {
-				B.v[uint32(i+A.n)<<16|uint32(i)] = 1
+				B.v[uint32(i)<<16|uint32(i+A.n)] = 1
 			}
 		} else {
 			for i := 0; i < rows+A.n; i++ {
-				B.v[uint32(i)<<16|uint32(i-A.n)] = 1
+				B.v[uint32(i-A.n)<<16|uint32(i)] = 1
 			}
 		}
 	default:

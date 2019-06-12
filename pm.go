@@ -32,7 +32,7 @@ func NewPSparse(rows, cols int) *PSM {
 }
 
 // PSparse converts any type of matrix to a sparse polynomial matrix. Panics if
-// the argument is too large. Types SM, FM, PSM, PFM, I, Z, R, and S are
+// the argument is too large. Types PSM, SM, FM, I, Z, R, and S are
 // special-cased. All other types are filled in O(mn) time.
 func PSparse(m M) *PSM {
 	rows, cols := m.Size()
@@ -41,6 +41,12 @@ func PSparse(m M) *PSM {
 	}
 	B := PSM{uint16(rows), uint16(cols), make(map[uint32]*big.Int)}
 	switch A := m.(type) {
+	case *PSM:
+		for k, v := range A.v {
+			if v.Sign() != 0 {
+				B.v[k] = new(big.Int).Set(v)
+			}
+		}
 	case *SM:
 		for k, v := range A.v {
 			if v != 0 {
@@ -57,17 +63,11 @@ func PSparse(m M) *PSM {
 				// of the matrix data, so we need to make sure we don't include
 				// that.
 				if c < int(B.c) {
-					B.v[uint32(c<<16)|uint32(r)] = big.NewInt(1)
+					B.v[uint32(c)<<16|uint32(r)] = big.NewInt(1)
 				}
 				w &= w - 1 // Mask off the low bit of w.
 			}
 			k += bits.UintSize
-		}
-	case *PSM:
-		for k, v := range A.v {
-			if v.Sign() != 0 {
-				B.v[k] = new(big.Int).Set(v)
-			}
 		}
 	case I:
 		for r := 0; r < rows; r++ {
@@ -81,16 +81,25 @@ func PSparse(m M) *PSM {
 			if r < 0 {
 				r += rows
 			}
-			B.v[uint32(r<<16)|uint32(i)] = big.NewInt(1)
+			B.v[uint32(i)<<16|uint32(r)] = big.NewInt(1)
 		}
 	case S:
 		if A.n >= 0 {
 			for i := 0; i < rows-A.n; i++ {
-				B.v[uint32(i+A.n)<<16|uint32(i)] = big.NewInt(1)
+				B.v[uint32(i)<<16|uint32(i+A.n)] = big.NewInt(1)
 			}
 		} else {
 			for i := 0; i < rows+A.n; i++ {
-				B.v[uint32(i)<<16|uint32(i-A.n)] = big.NewInt(1)
+				B.v[uint32(i-A.n)<<16|uint32(i)] = big.NewInt(1)
+			}
+		}
+	default:
+		for c := 0; c < cols; c++ {
+			for r := 0; r < cols; r++ {
+				q := A.At(r, c)
+				if q.Sign() != 0 {
+					B.v[uint32(c)<<16|uint32(r)] = new(big.Int).Set(q)
+				}
 			}
 		}
 	}
