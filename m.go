@@ -12,6 +12,7 @@ package gof2
 import (
 	"fmt"
 	"math/big"
+	"math/bits"
 )
 
 // M represents a matrix.
@@ -62,6 +63,75 @@ func NewSparse(rows, cols int) *SM {
 	}
 }
 
+// Sparse converts any type of binary matrix to a new sparse matrix. Panics if
+// the argument is a polynomial matrix with any element having degree higher
+// than one, or if m is too large. Types SM, FM, I, Z, R, and S are
+// special-cased. All other types are filled in O(mn) time.
+func Sparse(m M) *SM {
+	rows, cols := m.Size()
+	if rows > 65535 || cols > 65535 {
+		panic(fmt.Sprintf("cannot make %dx%d matrix: maximum dimension is 65535", rows, cols))
+	}
+	B := SM{uint16(rows), uint16(cols), make(map[uint32]uint8)}
+	switch A := m.(type) {
+	case *SM:
+		for k, v := range A.v {
+			if v != 0 {
+				B.v[k] = v
+			}
+		}
+	case *FM:
+		k := 0
+		for _, w := range A.v.Bits() {
+			for w != 0 {
+				b := k + bits.TrailingZeros(uint(w))
+				r, c := b%int(B.r), b/int(B.r)
+				// The bit vector in the full matrix has a bit set past the end
+				// of the matrix data, so we need to make sure we don't include
+				// that.
+				if c < int(B.c) {
+					B.v[uint32(c<<16)|uint32(r)] = 1
+				}
+				w &= w - 1 // Mask off the low bit of w.
+			}
+			k += bits.UintSize
+		}
+	case I:
+		for k := 0; k < rows; k++ {
+			B.v[uint32(k)*0x00010001] = 1
+		}
+	case Z:
+		// do nothing
+	case R:
+		for i := 0; i < rows; i++ {
+			r := i + A.n%rows
+			if r < 0 {
+				r += rows
+			}
+			B.v[uint32(r<<16)|uint32(i)] = 1
+		}
+	case S:
+		if A.n >= 0 {
+			for i := 0; i < rows-A.n; i++ {
+				B.v[uint32(i+A.n)<<16|uint32(i)] = 1
+			}
+		} else {
+			for i := 0; i < rows+A.n; i++ {
+				B.v[uint32(i)<<16|uint32(i-A.n)] = 1
+			}
+		}
+	default:
+		for r := 0; r < rows; r++ {
+			for c := 0; c < cols; c++ {
+				if check01(A.At(r+1, c+1)) != 0 {
+					B.v[uint32(c<<16)|uint32(r)] = 1
+				}
+			}
+		}
+	}
+	return &B
+}
+
 // Size returns the number of rows and columns in the matrix.
 func (sm *SM) Size() (rows, cols int) {
 	return int(sm.r), int(sm.c)
@@ -85,14 +155,18 @@ func (sm *SM) SetAt(r, c int, p *big.Int) {
 
 // AddAt adds to the element at the given one-based row and column. Panics if
 // the index is out of bounds or if p is not 0 or 1.
-func (sm *SM) AddAt(r, c int, p *big.Int) {
-	sm.v[sm.index(r, c)] ^= check01(p)
+func (sm *SM) AddAt(r, c int, p *big.Int) *big.Int {
+	k := sm.index(r, c)
+	sm.v[k] ^= check01(p)
+	return to01(sm.v[k] != 0)
 }
 
 // MulAt multiplies the element at the given one-based row and column. Panics
 // if the index is out of bounds or if p is not 0 or 1.
-func (sm *SM) MulAt(r, c int, p *big.Int) {
-	sm.v[sm.index(r, c)] &= check01(p)
+func (sm *SM) MulAt(r, c int, p *big.Int) *big.Int {
+	k := sm.index(r, c)
+	sm.v[k] &= check01(p)
+	return to01(sm.v[k] != 0)
 }
 
 // index panics if the given row or column indices are out of bounds and
@@ -107,7 +181,9 @@ func (sm *SM) index(r, c int) uint32 {
 	return uint32(uint16(c))<<16 | uint32(uint16(r))
 }
 
-// FM is a full matrix of size up to 65535x65535 of binary elements.
+// FM is a full matrix of size up to 65535x65535 of binary elements. In this
+// implementation, FM is more space-efficient than SM by the time the SM
+// reaches a load factor of 1/8.
 type FM struct {
 	r, c uint16
 	v    *big.Int
@@ -133,6 +209,47 @@ func NewFull(rows, cols int) *FM {
 	return &fm
 }
 
+// Full converts any type of binary matrix to a new full matrix. Panics if
+// the argument is a polynomial matrix with any element having degree higher
+// than one, or if m is too large. Types SM, FM, I, R, and S are special-cased;
+// all other types are filled in O(mn) time.
+func Full(m M) *FM {
+	rows, cols := m.Size()
+	if rows > 65535 || cols > 65535 {
+		panic(fmt.Sprintf("cannot make %dx%d matrix: maximum dimension is 65535", rows, cols))
+	}
+	B := FM{uint16(rows), uint16(cols), new(big.Int)}
+	switch A := m.(type) {
+	case *SM:
+		B.v.SetBit(B.v, rows*cols, 1)
+		for k, v := range A.v {
+			if v != 0 {
+				// Calculating indices manually lets us skip bounds checks.
+				r, c := int(k&0xffff), int(k>>16)
+				B.v.SetBit(B.v, c*rows+r, 1)
+			}
+		}
+	case *FM:
+		B.v.Set(A.v)
+	case I:
+		B.v.SetBit(B.v, rows*cols, 1)
+		for k := 0; k < rows; k++ {
+			B.v.SetBit(B.v, k*rows+k, 1)
+		}
+	default:
+		B.v.SetBit(B.v, rows*cols, 1)
+		for r := 0; r < rows; r++ {
+			for c := 0; c < cols; c++ {
+				p := check01(A.At(r+1, c+1))
+				if p != 0 {
+					B.v.SetBit(B.v, c*rows+r, 1)
+				}
+			}
+		}
+	}
+	return &B
+}
+
 // Size returns the size of the matrix.
 func (fm *FM) Size() (rows, cols int) {
 	return int(fm.r), int(fm.c)
@@ -156,20 +273,25 @@ func (fm *FM) SetAt(r, c int, p *big.Int) {
 
 // AddAt adds to the element at the given one-based row and column. Panics if
 // the index is out of bounds or if p is not 0 or 1.
-func (fm *FM) AddAt(r, c int, p *big.Int) {
+func (fm *FM) AddAt(r, c int, p *big.Int) *big.Int {
 	k := fm.index(r, c)
-	fm.v.SetBit(fm.v, k, fm.v.Bit(k)^uint(check01(p)))
+	v := fm.v.Bit(k) ^ uint(check01(p))
+	fm.v.SetBit(fm.v, k, v)
+	return to01(v != 0)
 }
 
 // MulAt multiplies the element at the given one-based row and column. Panics
 // if the index is out of bounds or if p is not 0 or 1.
-func (fm *FM) MulAt(r, c int, p *big.Int) {
+func (fm *FM) MulAt(r, c int, p *big.Int) *big.Int {
 	k := fm.index(r, c)
-	fm.v.SetBit(fm.v, k, fm.v.Bit(k)&uint(check01(p)))
+	v := fm.v.Bit(k) & uint(check01(p))
+	fm.v.SetBit(fm.v, k, v)
+	return to01(v != 0)
 }
 
 // index panics if the given row or column indices are out of bounds and
-// returns the corresponding bit vector coordinate otherwise.
+// returns the corresponding bit vector coordinate otherwise. The bit vector
+// is column-major.
 func (fm *FM) index(r, c int) int {
 	if r--; r < 0 || r >= int(fm.r) {
 		panic(fmt.Sprintf("row index %d out of bounds (size %dx%d)", r+1, fm.r, fm.c))
@@ -184,9 +306,22 @@ func (fm *FM) index(r, c int) int {
 // value if it is.
 func check01(p *big.Int) uint8 {
 	if p.Sign() < 0 || p.BitLen() > 1 {
-		panic(fmt.Sprintf("cannot use polynomial %s in binary element matrix", p.Text(2)))
+		s := "+"
+		if p.Sign() < 0 {
+			s = "-"
+		}
+		panic(fmt.Sprintf("cannot use polynomial %s%s in binary element matrix", s, p.Text(2)))
 	}
 	return uint8(p.Bit(0))
+}
+
+// to01 returns a polynomial representation of 1 if the argument is true or 0
+// otherwise.
+func to01(b bool) *big.Int {
+	if b {
+		return oneP
+	}
+	return zeroP
 }
 
 // Polynomial representations of F2's elements.
