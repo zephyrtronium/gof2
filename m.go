@@ -6,7 +6,7 @@
 // general focus is space efficiency rather than speed.
 //
 // The scope of gof2 is currently small, mostly serving as a way for me to
-// calculate primitive polynomials of pseudo-random number generators.
+// calculate characteristic polynomials of pseudo-random number generators.
 package gof2
 
 import (
