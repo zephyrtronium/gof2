@@ -102,7 +102,7 @@ func (rot R) At(r, c int) *big.Int {
 	return to01(r == c)
 }
 
-// S is an immutable square matrix such that the multiplication X*R(n), n > 0
+// S is an immutable square matrix such that the multiplication X*S(n), n > 0
 // gives Y where each row of X is shifted left n times and filled in with zeros
 // on the right to produce the corresponding row of Y; and for n < 0, the shift
 // is done to the right instead. That is, S(1) is the matrix with the principle
@@ -141,17 +141,17 @@ func (s S) At(r, c int) *big.Int {
 
 type immutableM struct{}
 
-// SetAt panics.
+// SetAt panics. The matrix is immutable.
 func (immutableM) SetAt(r, c int, p *big.Int) {
 	panic("immutable matrix must be converted before modifying")
 }
 
-// AddAt panics.
+// AddAt panics. The matrix is immutable.
 func (immutableM) AddAt(r, c int, p *big.Int) *big.Int {
 	panic("immutable matrix must be converted before modifying")
 }
 
-// MulAt panics.
+// MulAt panics. The matrix is immutable.
 func (immutableM) MulAt(r, c int, p *big.Int) *big.Int {
 	panic("immutable matrix must be converted before modifying")
 }
